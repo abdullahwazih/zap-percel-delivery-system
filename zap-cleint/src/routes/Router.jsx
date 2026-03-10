@@ -9,6 +9,9 @@ import Login from "../Components/Auth/Login";
 import Rider from "../Components/be_a_rider/Rider";
 import PrivateRoutes from "./PrivateRoutes";
 import SendPercel from "../Components/send_parcel/SendPercel";
+import Dashboard from "../layout/Routing_Layouts/Dashboard";
+import MyParcel from "../Components/Dashboard/my_percels/MyPercel";
+import Payment from "../Components/Dashboard/payment/Payment";
 
 
 const router = createBrowserRouter([
@@ -50,6 +53,20 @@ const router = createBrowserRouter([
             {
                 path: "login",
                 Component: Login,
+            },
+        ]
+    },
+    {
+        path: "/dashboard",
+        element: <PrivateRoutes> <Dashboard /> </PrivateRoutes>,
+        children: [
+            {
+                path: "my-parcels",
+                Component: MyParcel,
+            },
+            {
+                path: "payment/:parcelId",
+                Component: Payment,
             },
         ]
     }
