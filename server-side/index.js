@@ -1,24 +1,29 @@
 const express = require("express");
 const cors = require("cors");
 const dotenv = require("dotenv");
-const stripe = require('stripe')('process.env.STRIPE_KEY');
 
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 
 dotenv.config();
 
+const stripe = require("stripe")(process.env.STRIPE_KEY);
+
 const mongoUser = process.env.MONGO_USER;
 const mongoPassword = process.env.MONGO_PASSWORD;
 const mongoCluster = process.env.MONGO_CLUSTER || "cluster0.r8o8snu.mongodb.net";
 const mongoAppName = process.env.MONGO_APP_NAME || "Cluster0";
+const mongoUri = process.env.MONGO_URI;
 
-if (!mongoUser || !mongoPassword) {
-  throw new Error("Missing MONGO_USER or MONGO_PASSWORD in environment variables");
+if (!mongoUri && (!mongoUser || !mongoPassword)) {
+  throw new Error("Missing MONGO_URI or (MONGO_USER and MONGO_PASSWORD) in environment variables");
 }
 
-const uri = `mongodb+srv://${encodeURIComponent(mongoUser)}:${encodeURIComponent(
-  mongoPassword
-)}@${mongoCluster}/?appName=${encodeURIComponent(mongoAppName)}`;
+const uri =
+  mongoUri ||
+  `mongodb+srv://${encodeURIComponent(mongoUser)}:${encodeURIComponent(
+    mongoPassword
+  )}@${mongoCluster}/?appName=${encodeURIComponent(mongoAppName)}`;
+
 
 // Create a MongoClient with a MongoClientOptions object to set the Stable API version
 const client = new MongoClient(uri, {
@@ -101,17 +106,100 @@ async function run() {
 
       try {
         const result = await parcelsCollection.deleteOne({ _id: new ObjectId(id) });
-        
+
         if (result.deletedCount === 1) {
           res.status(200).json({ message: "Parcel deleted" });
         } else {
           res.status(404).json({ message: "Parcel not found" });
         }
       } catch (error) {
-         console.error("Error deleting parcel:", error);
+        console.error("Error deleting parcel:", error);
         res.status(500).json({ message: "Internal server error" });
       }
     });
+
+    //Payment  
+
+    app.post('/create-checkout-session', async (req, res) => {
+
+      const paymentInfo = req.body;
+      const amount = paymentInfo.cost * 100; // Convert to cents
+
+      const session = await stripe.checkout.sessions.create({
+        line_items: [
+          {
+            // Provide the exact Price ID (for example, price_1234) of the product you want to sell
+            price_data: {
+              currency: 'usd',
+              product_data: {
+                name: paymentInfo.parcelName,
+                description: "Delivery fee for parcel #" + paymentInfo.parcelId,
+
+              },
+              unit_amount: amount,
+            },
+            quantity: 1,
+          },
+        ],
+        customer_email: paymentInfo.email,
+        mode: 'payment',
+        metadata: {
+          parcelId: paymentInfo.parcelId,
+        },
+        success_url: `${process.env.SITE_DOMAIN}dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${process.env.SITE_DOMAIN}dashboard/payment-cancelled`,
+      });
+
+      console.log("Stripe checkout session created:", session);
+      console.log("Session URL:", session.url);
+
+      res.send({ url: session.url });
+
+    });
+
+    app.get('/payments/session-status', async (req, res) => {
+      const { session_id: sessionId } = req.query;
+
+      if (!sessionId) {
+        return res.status(400).json({ message: "session_id is required" });
+      }
+
+      try {
+        const session = await stripe.checkout.sessions.retrieve(sessionId);
+        const parcelId = session?.metadata?.parcelId;
+        const isPaid = session.payment_status === 'paid';
+
+        if (isPaid && parcelId && ObjectId.isValid(parcelId)) {
+          await parcelsCollection.updateOne(
+            { _id: new ObjectId(parcelId) },
+            {
+              $set: {
+                payment_status: 'paid',
+                paid: true,
+                stripeSessionId: session.id,
+                transactionId: session.payment_intent || null,
+                paid_at: new Date().toISOString(),
+              },
+            }
+          );
+        }
+
+        return res.status(200).json({
+          sessionId: session.id,
+          payment_status: session.payment_status,
+          status: session.status,
+          amount_total: session.amount_total,
+          currency: session.currency,
+          parcelId: parcelId || null,
+          paid: isPaid,
+        });
+      } catch (error) {
+        console.error("Error verifying Stripe session:", error);
+        return res.status(500).json({ message: "Failed to verify payment session" });
+      }
+    });
+
+    // Payment history 
 
   } catch (error) {
     console.error("Failed to initialize MongoDB connection:", error);

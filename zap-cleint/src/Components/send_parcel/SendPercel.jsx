@@ -1,6 +1,8 @@
+import { useEffect } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import Swal from "sweetalert2";
 import useAxios from "../../hooks/useAxios";
+import useAuth from "../../hooks/useAuth";
 import ParcelTypeSelector from "./ParcelTypeSelector";
 import ParcelDetails from "./ParcelDetails";
 import SenderDetails from "./SenderDetails";
@@ -10,15 +12,19 @@ import calculateDeliveryCost from "./calculateDeliveryCost";
 
 const SendPercel = () => {
     const axiosInstance = useAxios();
+    const { authInfo } = useAuth();
+    const { user } = authInfo || {};
 
     const {
         register: bindField,
         handleSubmit,
         control,
+        setValue,
         formState: { errors },
     } = useForm({
         defaultValues: {
             parcel_type: "document",
+            senderEmail: "",
         },
     });
 
@@ -33,6 +39,12 @@ const SendPercel = () => {
     const senderDistrict = useWatch({ control, name: "sender_district" });
     const receiverDistrict = useWatch({ control, name: "receiver_district" });
 
+    useEffect(() => {
+        if (user?.email) {
+            setValue("senderEmail", user.email);
+        }
+    }, [setValue, user?.email]);
+
     const estimatedCost = calculateDeliveryCost({
         parcelType,
         parcelWeight,
@@ -41,6 +53,7 @@ const SendPercel = () => {
     });
 
     const onSubmit = async (data) => {
+        const senderEmail = user?.email || data.senderEmail;
         const deliveryCost = calculateDeliveryCost({
             parcelType: data.parcel_type,
             parcelWeight: data.parcel_weight,
@@ -52,6 +65,7 @@ const SendPercel = () => {
 
         const payload = {
             ...data,
+            senderEmail,
             parcel_weight: Number(data.parcel_weight),
             delivery_zone: isWithinCity ? "within_city" : "outside_city_district",
             delivery_cost: deliveryCost,
@@ -125,6 +139,7 @@ const SendPercel = () => {
                 <p className="mt-2 text-sm font-semibold text-secondary/80">Enter your parcel details</p>
 
                 <form className="mt-6" onSubmit={handleSubmit(onSubmit)}>
+                    <input type="hidden" {...bindField("senderEmail")} />
                     <ParcelTypeSelector bindField={bindField} errors={errors} errorClass={errorClass} />
 
                     <ParcelDetails

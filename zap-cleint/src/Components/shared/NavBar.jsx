@@ -45,6 +45,12 @@ const NavBar = () => {
             <div className="navbar-end gap-3 ">
                 {user ? (
                     <div className="flex items-center gap-4">
+                        <NavLink
+                            to="/dashboard/my-parcels"
+                            className="btn btn-sm rounded-full text-base bg-transparent border border-base-content/40 hover:bg-base-200"
+                        >
+                            Dashboard
+                        </NavLink>
                         <p>{user.displayName}</p>
                         <button
                             onClick={handleLogout}

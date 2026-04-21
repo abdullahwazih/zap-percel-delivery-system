@@ -63,6 +63,7 @@ const MyParcel = () => {
 
     return (
         <div className="overflow-x-auto">
+            <p>Parcels of user {user?.email}</p>
             <table className="table table-md">
                 <thead>
                     <tr>
