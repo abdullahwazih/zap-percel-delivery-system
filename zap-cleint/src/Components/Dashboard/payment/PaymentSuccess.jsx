@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import useAxios from '../../../hooks/useAxios';
 
 const PaymentSuccess = () => {
+    
     const axiosInstance = useAxios();
     const [searchParams] = useSearchParams();
     const sessionId = searchParams.get('session_id');

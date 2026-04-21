@@ -27,7 +27,9 @@ const Payment = () => {
         try {
             const res = await axiosInstance.post('/create-checkout-session', paymentInfo);
             console.log('Checkout session created:', res.data);
+
             // 🔥 Redirect to Stripe Checkout
+            console.log('Redirecting to Stripe Checkout at:', res.data.url);
             window.location.href = res.data.url;
 
         } catch (error) {

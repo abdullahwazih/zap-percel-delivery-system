@@ -21,6 +21,7 @@ const MyParcel = () => {
         queryKey: ['parcels', user?.email],
         queryFn: async () => {
             const res = await axiosInstance.get('/parcels?email=' + user?.email);
+            console.log('Fetched parcels:', res.data);
             return res.data;
         }
     });

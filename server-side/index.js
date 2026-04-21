@@ -40,6 +40,12 @@ const port = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
+const generateTrackingNumber = () => {
+  const prefix = "ZAP";
+  const timestamp = Date.now().toString(36).toUpperCase();
+  const random = Math.random().toString(36).substring(2, 6).toUpperCase();
+  return `${prefix}-${timestamp}-${random}`;
+};
 
 
 
@@ -54,6 +60,7 @@ async function run() {
 
     const db = client.db("zap");
     const parcelsCollection = db.collection("parcels");
+    const paymentHistoryCollection = db.collection("paymentHistory");
 
     app.post("/parcels", async (req, res) => {
       try {
@@ -118,45 +125,66 @@ async function run() {
       }
     });
 
+
+
     //Payment  
 
-    app.post('/create-checkout-session', async (req, res) => {
+    // Create Stripe checkout session endpoint
 
-      const paymentInfo = req.body;
-      const amount = paymentInfo.cost * 100; // Convert to cents
+	    app.post('/create-checkout-session', async (req, res) => {
+	
+	      const paymentInfo = req.body;
+	      const amount = paymentInfo.cost * 100; // Convert to cents
 
-      const session = await stripe.checkout.sessions.create({
-        line_items: [
-          {
-            // Provide the exact Price ID (for example, price_1234) of the product you want to sell
-            price_data: {
-              currency: 'usd',
-              product_data: {
-                name: paymentInfo.parcelName,
-                description: "Delivery fee for parcel #" + paymentInfo.parcelId,
+	      const siteDomain = process.env.SITE_DOMAIN;
+	      if (!siteDomain) {
+	        return res.status(500).json({ message: "SITE_DOMAIN is not configured on the server" });
+	      }
 
-              },
-              unit_amount: amount,
-            },
-            quantity: 1,
-          },
-        ],
-        customer_email: paymentInfo.email,
-        mode: 'payment',
-        metadata: {
-          parcelId: paymentInfo.parcelId,
-        },
-        success_url: `${process.env.SITE_DOMAIN}dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${process.env.SITE_DOMAIN}dashboard/payment-cancelled`,
-      });
+	      const siteBase = siteDomain.replace(/\/+$/, "");
+	      const successUrl = `${siteBase}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`;
+	      const cancelUrl = `${siteBase}/dashboard/payment-cancelled`;
 
-      console.log("Stripe checkout session created:", session);
-      console.log("Session URL:", session.url);
+	      try {
+	        const session = await stripe.checkout.sessions.create({
+	          line_items: [
+	            {
+	              // Provide the exact Price ID (for example, price_1234) of the product you want to sell
+	              price_data: {
+	                currency: 'usd',
+	                product_data: {
+	                  name: paymentInfo.parcelName,
+	                  description: "Delivery fee for parcel #" + paymentInfo.parcelId,
 
-      res.send({ url: session.url });
+	                },
+	                unit_amount: amount,
+	              },
+	              quantity: 1,
+	            },
+	          ],
+	          customer_email: paymentInfo.email,
+	          mode: 'payment',
+	          metadata: {
+	            parcelId: paymentInfo.parcelId,
+	          },
+	          success_url: successUrl,
+	          cancel_url: cancelUrl,
+	        });
 
-    });
+	        console.log("Session URL:", session.url);
+	        console.log("Success URL:", successUrl);
+	        console.log("Cancel URL:", cancelUrl);
 
+	        return res.send({ url: session.url });
+	      } catch (error) {
+	        console.error("Error creating Stripe checkout session:", error);
+	        return res.status(500).json({ message: "Failed to create checkout session" });
+	      }
+	
+	    });
+     
+    //Payment status verification endpoint
+    
     app.get('/payments/session-status', async (req, res) => {
       const { session_id: sessionId } = req.query;
 
@@ -182,6 +210,39 @@ async function run() {
               },
             }
           );
+
+          const parcel = await parcelsCollection.findOne({ _id: new ObjectId(parcelId) });
+          if (parcel) {
+            const trackingNumber = parcel?.tracking_number || generateTrackingNumber();
+            if (!parcel?.tracking_number) {
+              await parcelsCollection.updateOne(
+                { _id: new ObjectId(parcelId) },
+                { $set: { tracking_number: trackingNumber } }
+              );
+            }
+
+            const cost = parcel?.delivery_cost ?? (typeof session.amount_total === "number" ? session.amount_total / 100 : null);
+            await paymentHistoryCollection.updateOne(
+              { parcel_id: parcelId },
+              {
+                $setOnInsert: {
+                  parcel_name: parcel?.parcel_name ?? null,
+                  parcel_id: parcelId,
+                  sender_email: parcel?.senderEmail ?? parcel?.sender_email ?? session.customer_email ?? null,
+                  receiver_email: parcel?.receiverEmail ?? parcel?.receiver_email ?? null,
+                  receiver_name: parcel?.receiver_name ?? null,
+                  address: parcel?.receiver_address ?? null,
+                  cost,
+                  transaction_number: parcelId,
+                  created_at: new Date().toISOString(),
+                },
+                $set: {
+                  tracking_number: trackingNumber,
+                },
+              },
+              { upsert: true }
+            );
+          }
         }
 
         return res.status(200).json({
@@ -200,6 +261,24 @@ async function run() {
     });
 
     // Payment history 
+    app.get("/payment-history", async (req, res) => {
+      const { email } = req.query;
+
+      if (!email) {
+        return res.status(400).json({ message: "email is required" });
+      }
+
+      try {
+        const cursor = paymentHistoryCollection
+          .find({ sender_email: email })
+          .sort({ created_at: -1 });
+        const result = await cursor.toArray();
+        return res.status(200).json(result);
+      } catch (error) {
+        console.error("Error fetching payment history:", error);
+        return res.status(500).json({ message: "Failed to fetch payment history" });
+      }
+    });
 
   } catch (error) {
     console.error("Failed to initialize MongoDB connection:", error);
