@@ -4,6 +4,8 @@ const dotenv = require("dotenv");
 
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 
+const verifyFBToken = require("./server/Middleware/VerifyFbToken");
+
 dotenv.config();
 
 const stripe = require("stripe")(process.env.STRIPE_KEY);
@@ -40,12 +42,17 @@ const port = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
+
+
+
+
 const generateTrackingNumber = () => {
   const prefix = "ZAP";
   const timestamp = Date.now().toString(36).toUpperCase();
   const random = Math.random().toString(36).substring(2, 6).toUpperCase();
   return `${prefix}-${timestamp}-${random}`;
 };
+
 
 
 
@@ -73,9 +80,12 @@ async function run() {
       }
     });
 
-    app.get('/parcels', async (req, res) => {
+    app.get('/parcels', verifyFBToken, async (req, res) => {
       const { email } = req.query;
-
+      
+      if (email != req.decoded_email) {
+        return res.status(403).json({ message: "Forbidden: Email does not match token" });
+      }
       const query = email ? { senderEmail: email } : {};
 
       const cursor = parcelsCollection.find(query);
@@ -131,60 +141,60 @@ async function run() {
 
     // Create Stripe checkout session endpoint
 
-	    app.post('/create-checkout-session', async (req, res) => {
-	
-	      const paymentInfo = req.body;
-	      const amount = paymentInfo.cost * 100; // Convert to cents
+    app.post('/create-checkout-session', async (req, res) => {
 
-	      const siteDomain = process.env.SITE_DOMAIN;
-	      if (!siteDomain) {
-	        return res.status(500).json({ message: "SITE_DOMAIN is not configured on the server" });
-	      }
+      const paymentInfo = req.body;
+      const amount = paymentInfo.cost * 100; // Convert to cents
 
-	      const siteBase = siteDomain.replace(/\/+$/, "");
-	      const successUrl = `${siteBase}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`;
-	      const cancelUrl = `${siteBase}/dashboard/payment-cancelled`;
+      const siteDomain = process.env.SITE_DOMAIN;
+      if (!siteDomain) {
+        return res.status(500).json({ message: "SITE_DOMAIN is not configured on the server" });
+      }
 
-	      try {
-	        const session = await stripe.checkout.sessions.create({
-	          line_items: [
-	            {
-	              // Provide the exact Price ID (for example, price_1234) of the product you want to sell
-	              price_data: {
-	                currency: 'usd',
-	                product_data: {
-	                  name: paymentInfo.parcelName,
-	                  description: "Delivery fee for parcel #" + paymentInfo.parcelId,
+      const siteBase = siteDomain.replace(/\/+$/, "");
+      const successUrl = `${siteBase}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`;
+      const cancelUrl = `${siteBase}/dashboard/payment-cancelled`;
 
-	                },
-	                unit_amount: amount,
-	              },
-	              quantity: 1,
-	            },
-	          ],
-	          customer_email: paymentInfo.email,
-	          mode: 'payment',
-	          metadata: {
-	            parcelId: paymentInfo.parcelId,
-	          },
-	          success_url: successUrl,
-	          cancel_url: cancelUrl,
-	        });
+      try {
+        const session = await stripe.checkout.sessions.create({
+          line_items: [
+            {
+              // Provide the exact Price ID (for example, price_1234) of the product you want to sell
+              price_data: {
+                currency: 'usd',
+                product_data: {
+                  name: paymentInfo.parcelName,
+                  description: "Delivery fee for parcel #" + paymentInfo.parcelId,
 
-	        console.log("Session URL:", session.url);
-	        console.log("Success URL:", successUrl);
-	        console.log("Cancel URL:", cancelUrl);
+                },
+                unit_amount: amount,
+              },
+              quantity: 1,
+            },
+          ],
+          customer_email: paymentInfo.email,
+          mode: 'payment',
+          metadata: {
+            parcelId: paymentInfo.parcelId,
+          },
+          success_url: successUrl,
+          cancel_url: cancelUrl,
+        });
 
-	        return res.send({ url: session.url });
-	      } catch (error) {
-	        console.error("Error creating Stripe checkout session:", error);
-	        return res.status(500).json({ message: "Failed to create checkout session" });
-	      }
-	
-	    });
-     
+        console.log("Session URL:", session.url);
+        console.log("Success URL:", successUrl);
+        console.log("Cancel URL:", cancelUrl);
+
+        return res.send({ url: session.url });
+      } catch (error) {
+        console.error("Error creating Stripe checkout session:", error);
+        return res.status(500).json({ message: "Failed to create checkout session" });
+      }
+
+    });
+
     //Payment status verification endpoint
-    
+
     app.get('/payments/session-status', async (req, res) => {
       const { session_id: sessionId } = req.query;
 
@@ -263,6 +273,8 @@ async function run() {
     // Payment history 
     app.get("/payment-history", async (req, res) => {
       const { email } = req.query;
+
+      console.log("Headers", req.headers);
 
       if (!email) {
         return res.status(400).json({ message: "email is required" });

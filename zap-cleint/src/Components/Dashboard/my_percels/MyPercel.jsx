@@ -1,5 +1,5 @@
 import useAuth from '../../../hooks/useAuth';
-import useAxios from '../../../hooks/useAxios'
+import useAxiosSecure from '../../../hooks/useAxiosSecure'
 import { useQuery } from '@tanstack/react-query';
 import { Eye, Pencil, Trash2 } from 'lucide-react';
 import Swal from 'sweetalert2';
@@ -11,7 +11,7 @@ const MyParcel = () => {
     const { authInfo } = useAuth();
     const { user } = authInfo;
 
-    const axiosInstance = useAxios();
+    const axiosSecure = useAxiosSecure();
 
 
 
@@ -19,8 +19,9 @@ const MyParcel = () => {
     const { data: parcels, isLoading, error, refetch } = useQuery({
 
         queryKey: ['parcels', user?.email],
+        enabled: !!user?.email,
         queryFn: async () => {
-            const res = await axiosInstance.get('/parcels?email=' + user?.email);
+            const res = await axiosSecure.get('/parcels?email=' + user?.email);
             console.log('Fetched parcels:', res.data);
             return res.data;
         }
@@ -43,7 +44,7 @@ const MyParcel = () => {
 
             if (result.isConfirmed) {
 
-                axiosInstance.delete(`parcels/${id}`)
+                axiosSecure.delete(`/parcels/${id}`)
                     .then(response => {
                         console.log('Parcel deleted:', response.data);
                         refetch();
